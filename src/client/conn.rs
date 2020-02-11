@@ -123,8 +123,9 @@ pub struct Parts<T> {
 
 // A `SendRequest` that can be cloned to send HTTP2 requests.
 // private for now, probably not a great idea of a type...
+/// DOX
 #[must_use = "futures do nothing unless polled"]
-pub(super) struct Http2SendRequest<B> {
+pub struct Http2SendRequest<B> {
     dispatch: dispatch::UnboundedSender<Request<B>, Response<Body>>,
 }
 
@@ -154,7 +155,8 @@ impl<B> SendRequest<B> {
         self.dispatch.is_closed()
     }
 
-    pub(super) fn into_http2(self) -> Http2SendRequest<B> {
+    /// DOX
+    pub fn into_http2(self) -> Http2SendRequest<B> {
         Http2SendRequest {
             dispatch: self.dispatch.unbound(),
         }
@@ -260,6 +262,35 @@ where
 
     fn call(&mut self, req: Request<B>) -> Self::Future {
         self.send_request(req)
+    }
+}
+
+impl<B> Service<Request<B>> for Http2SendRequest<B>
+where
+    B: Payload + 'static,
+{
+    type Response = Response<Body>;
+    type Error = crate::Error;
+    // type Future = ResponseFuture;
+    type Future =
+        Pin<Box<dyn Future<Output = Result<Response<Body>, crate::Error>> + Send + 'static>>;
+
+    fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // self.poll_ready(cx)
+        // self.dispatch.poll_ready(cx)
+        Ok(()).into()
+    }
+
+    fn call(&mut self, req: Request<B>) -> Self::Future {
+        let rx = self.send_request_retryable(req);
+        // let inner = ResponseFutureState::Waiting(rx);
+        // ResponseFuture { inner }
+        Box::pin(async move {
+            match rx.await {
+                Ok(res) => Ok(res),
+                Err((err, _)) => Err(err),
+            }
+        })
     }
 }
 
